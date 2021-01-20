@@ -24,7 +24,7 @@ const AVAILABLE_THEMES = [
 const MODAL_CONTENT = {
     help: `
 <h1>dérive</h1>
-<h4>Drag and drop one or more GPX/TCX/FIT files or JPEG images here.</h4>
+<h4>Drag and drop one or more GPX/TCX/FIT/IGC files or JPEG images here.</h4>
 <p>If you use Strava, go to your
 <a href="https://www.strava.com/athlete/delete_your_account">account download
 page</a> and click "Request your archive". You'll get an email containing a ZIP
@@ -196,7 +196,7 @@ function buildUploadModal(numFiles) {
 }
 
 
-export function buildSettingsModal(tracks, opts, finishCallback) {
+export function buildSettingsModal(tracks, opts, updateCallback) {
     let overrideExisting = opts.lineOptions.overrideExisting ? 'checked' : '';
 
     if (tracks.length > 0) {
@@ -299,7 +299,7 @@ export function buildSettingsModal(tracks, opts, finishCallback) {
         },
     });
 
-    modal.afterClose((modal) => {
+    let applyOptions = () => {
         let elements = document.getElementById('settings').elements;
         let options = Object.assign({}, opts);
 
@@ -320,9 +320,22 @@ export function buildSettingsModal(tracks, opts, finishCallback) {
             options.lineOptions[opt] = elements[opt].checked;
         }
 
-        finishCallback(options);
-        modal.destroy();
+        updateCallback(options);
+    };
+
+    modal.afterClose((modal) => {
+      applyOptions();
+      modal.destroy();
     });
+
+    modal.afterCreate(() => {
+      let elements = document.getElementById('settings').elements;
+      for (let opt of ['theme', 'color', 'weight', 'opacity', 'markerColor',
+                       'markerWeight', 'markerOpacity', 'markerRadius']) {
+        elements[opt].addEventListener('change', applyOptions);
+      }
+    });
+
 
     return modal;
 }
@@ -388,13 +401,25 @@ export function showModal(type) {
 }
 
 
+const INTRO_MODAL_SEEN_KEY = 'intro-modal-seen';
+
 export function initialize(map) {
-    let modal = showModal('help');
+    // We don't need to show the help modal every time, only the first
+    // time the user sees the page.
+    let displayIntroModal = true;
+
+    if (window.sessionStorage.getItem(INTRO_MODAL_SEEN_KEY) !== null) {
+        displayIntroModal = false;
+    } else {
+        window.sessionStorage.setItem(INTRO_MODAL_SEEN_KEY, 'true');
+    }
+
+
+    let modal = displayIntroModal ? showModal('help') : null;
 
     window.addEventListener('dragover', handleDragOver, false);
-
     window.addEventListener('drop', e => {
-        if (!modal.destroyed) {
+        if (displayIntroModal && !modal.destroyed) {
             modal.destroy();
             modal.destroyed = true;
         }

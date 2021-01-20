@@ -6,9 +6,9 @@
 // GPX files.
 
 import xml2js from 'xml2js';
-import EasyFit from 'easy-fit';
+import FitParser from 'fit-file-parser';
 import Pako from 'pako';
-
+import IGCParser from 'igc-parser';
 
 const parser = new xml2js.Parser();
 
@@ -26,7 +26,7 @@ function extractGPXTracks(gpx) {
 
         trk.trkseg.forEach(trkseg => {
             let points = [];
-            for (let trkpt of trkseg.trkpt) {
+            for (let trkpt of trkseg.trkpt || []) {
                 if (trkpt.time && typeof trkpt.time[0] === 'string') {
                     timestamp = new Date(trkpt.time[0]);
                 }
@@ -42,7 +42,9 @@ function extractGPXTracks(gpx) {
                 }
             }
 
-            parsedTracks.push({timestamp, points, name});
+            if (points.length > 0) {
+                parsedTracks.push({timestamp, points, name});
+            }
         });
     });
 
@@ -50,7 +52,7 @@ function extractGPXTracks(gpx) {
         let name = rte.name && rte.name.length > 0 ? rte.name[0] : 'untitled';
         let timestamp;
         let points = [];
-        for (let pt of rte.rtept) {
+        for (let pt of rte.rtept || []) {
             if (pt.time && typeof pt.time[0] === 'string') {
                 timestamp = new Date(pt.time[0]);
             }
@@ -60,7 +62,9 @@ function extractGPXTracks(gpx) {
             });
         }
 
-        parsedTracks.push({timestamp, points, name});
+        if (points.length > 0) {
+            parsedTracks.push({timestamp, points, name});
+        }
     });
 
     return parsedTracks;
@@ -74,7 +78,10 @@ function extractTCXTracks(tcx, name) {
 
     const parsedTracks = [];
     for (const act of tcx.Activities[0].Activity) {
-        for (const lap of act.Lap) {
+        for (const lap of act.Lap || []) {
+            if (!lap.Track || lap.Track.length === 0) {
+                continue;
+            }
             let trackPoints = lap.Track[0].Trackpoint.filter(it => it.Position);
             let timestamp;
             let points = []
@@ -91,7 +98,9 @@ function extractTCXTracks(tcx, name) {
                 });
             }
 
-            parsedTracks.push({timestamp, points, name});
+            if (points.length > 0) {
+                parsedTracks.push({timestamp, points, name});
+            }
         }
     }
 
@@ -117,9 +126,23 @@ function extractFITTracks(fit, name) {
         record.timestamp && (timestamp = record.timestamp);
     }
 
-    return [{timestamp, points, name}];
+    return points.length > 0 ? [{timestamp, points, name}] : [];
 }
 
+function extractIGCTracks(igc) {
+  const points = [];
+  let timestamp = null;
+  for (const fix of igc.fixes) {
+    points.push({
+        lat: fix.latitude,
+        lng: fix.longitude,
+        // Other available fields: pressureAltitude, gpsAltitude, etc.
+    });
+    timestamp = timestamp || new Date(fix.timestamp);
+  }
+  const name = 'igc';
+  return points.length > 0 ? [{timestamp, points, name}] : [];
+}
 
 function readFile(file, encoding, isGzipped) {
     return new Promise((resolve, reject) => {
@@ -168,7 +191,7 @@ export default function extractTracks(file) {
     case 'fit':
         return readFile(file, 'binary', isGzipped)
             .then(contents => new Promise((resolve, reject) => {
-                const parser = new EasyFit({
+                const parser = new FitParser({
                     force: true,
                     mode: 'list',
                 });
@@ -180,6 +203,16 @@ export default function extractTracks(file) {
                         resolve(extractFITTracks(result, strippedName));
                     }
                 });
+            }));
+
+    case 'igc':
+        return readFile(file, 'text', isGzipped)
+            .then(textContents => new Promise((resolve, reject) => {
+                try {
+                    resolve(extractIGCTracks(IGCParser.parse(textContents, {lenient: true})));
+                } catch(err) {
+                    reject(err);
+                }
             }));
 
     default:
